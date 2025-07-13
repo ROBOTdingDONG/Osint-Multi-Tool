@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSINT Intelligence Dashboard</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <link href="https://unpkg.com/vis-network/styles/vis-network.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 20px;
+            height: 100vh;
+        }
+        
+        .control-panel {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .visualization-panel {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        #network-graph {
+            width: 100%;
+            height: 400px;
+            border: 1px solid #ddd;
+        }
+        
+        .target-input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .collection-button {
+            width: 100%;
+            padding: 12px;
+            background: #007acc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        
+        .collection-button:hover {
+            background: #005a99;
+        }
+        
+        .results-panel {
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .entity-card {
+            background: #f8f9fa;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            border-left: 4px solid #007acc;
+        }
+        
+        .confidence-bar {
+            height: 4px;
+            background: #e0e0e0;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+        
+        .confidence-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff4444, #ffaa00, #44ff44);
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="control-panel">
+            <h2>OSINT Collection Control</h2>
+            
+            <div class="input-section">
+                <label for="target-input">Target:</label>
+                <input type="text" id="target-input" class="target-input" placeholder="Enter domain, IP, or email">
+                
+                <label for="target-type">Type:</label>
+                <select id="target-type" class="target-input">
+                    <option value="domain">Domain</option>
+                    <option value="ip">IP Address</option>
+                    <option value="email">Email</option>
+                    <option value="person">Person</option>
+                </select>
+                
+                <h4>Collection Modules:</h4>
+                <div class="module-selection">
+                    <input type="checkbox" id="spiderfoot" value="spiderfoot" checked>
+                    <label for="spiderfoot">SpiderFoot</label><br>
+                    
+                    <input type="checkbox" id="shodan" value="shodan" checked>
+                    <label for="shodan">Shodan</label><br>
+                    
+                    <input type="checkbox" id="harvester" value="harvester" checked>
+                    <label for="harvester">TheHarvester</label><br>
+                    
+                    <input type="checkbox" id="recon_ng" value="recon_ng">
+                    <label for="recon_ng">Recon-ng</label><br>
+                </div>
+                
+                <button class="collection-button" onclick="startCollection()">Start Collection</button>
+            </div>
+            
+            <div class="results-panel" id="results-panel">
+                <h3>Collection Results</h3>
+                <div id="entity-list"></div>
+            </div>
+        </div>
+        
+        <div class="visualization-panel">
+            <h2>Intelligence Visualization</h2>
+            <div id="network-graph"></div>
+            
+            <div class="stats-panel">
+                <h3>Collection Statistics</h3>
+                <div id="stats-content">
+                    <p>Total Entities: <span id="total-entities">0</span></p>
+                    <p>Sources Used: <span id="sources-used">0</span></p>
+                    <p>Last Updated: <span id="last-updated">Never</span></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class OSINTDashboard {
+            constructor() {
+                this.network = null;
+                this.initializeVisualization();
+            }
+            
+            initializeVisualization() {
+                const container = document.getElementById('network-graph');
+                
+                // Initial empty network
+                const data = {
+                    nodes: new vis.DataSet([]),
+                    edges: new vis.DataSet([])
+                };
+                
+                const options = {
+                    nodes: {
+                        shape: 'dot',
+                        size: 16,
+                        font: {
+                            size: 12,
+                            color: '#333'
+                        },
+                        borderWidth: 2,
+                        shadow: true
+                    },
+                    edges: {
+                        width: 1,
+                        color: {inherit: 'from'},
+                        smooth: {
+                            type: 'continuous'
+                        }
+                    },
+                    physics: {
+                        stabilization: {iterations: 1000},
+                        barnesHut: {
+                            gravitationalConstant: -8000,
+                            springConstant: 0.001,
+                            springLength: 200
+                        }
+                    },
+                    interaction: {
+                        hover: true,
+                        tooltipDelay: 300
+                    }
+                };
+                
+                this.network = new vis.Network(container, data, options);
+                
+                // Add event listeners
+                this.network.on('click', this.onNodeClick.bind(this));
+                this.network.on('hoverNode', this.onNodeHover.bind(this));
+            }
+            
+            async startCollection() {
+                const target = document.getElementById('target-input').value;
+                const targetType = document.getElementById('target-type').value;
+                const modules = this.getSelectedModules();
+                
+                if (!target) {
+                    alert('Please enter a target');
+                    return;
+                }
+                
+                // Show loading state
+                document.querySelector('.collection-button').textContent = 'Collecting...';
+                document.querySelector('.collection-button').disabled = true;
+                
+                try {
+                    const response = await fetch('/api/collect', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            target_value: target,
+                            target_type: targetType,
+                            collection_modules: modules
+                        })
+                    });
+                    
+                    const results = await response.json();
+                    this.updateVisualization(results);
+                    this.updateResultsPanel(results);
+                    
+                } catch (error) {
+                    console.error('Collection error:', error);
+                    alert('Collection failed: ' + error.message);
+                } finally {
+                    // Reset button
+                    document.querySelector('.collection-button').textContent = 'Start Collection';
+                    document.querySelector('.collection-button').disabled = false;
+                }
+            }
+            
+            getSelectedModules() {
+                const checkboxes = document.querySelectorAll('.module-selection input[type="checkbox"]:checked');
+                return Array.from(checkboxes).map(cb => cb.value);
+            }
+            
+            updateVisualization(results) {
+                const vizData = JSON.parse(results.visualization_data);
+                
+                // Prepare nodes
+                const nodes = vizData.nodes.map(node => ({
+                    id: node.id,
+                    label: node.label,
+                    title: this.createNodeTooltip(node),
+                    color: this.getNodeColor(node.type),
+                    size: node.size || 16
+                }));
+                
+                // Prepare edges
+                const edges = vizData.edges.map(edge => ({
+                    from: edge.from,
+                    to: edge.to,
+                    label: edge.label,
+                    arrows: 'to'
+                }));
+                
+                // Update network
+                this.network.setData({
+                    nodes: new vis.DataSet(nodes),
+                    edges: new vis.DataSet(edges)
+                });
+                
+                // Update stats
+                document.getElementById('total-entities').textContent = vizData.metadata.total_entities;
+                document.getElementById('sources-used').textContent = vizData.metadata.sources.length;
+                document.getElementById('last-updated').textContent = new Date().toLocaleString();
+            }
+            
+            createNodeTooltip(node) {
+                return `
+                    <div>
+                        <strong>${node.label}</strong><br>
+                        Type: ${node.type}<br>
+                        ${node.source ? `Source: ${node.source}<br>` : ''}
+                        ${node.confidence ? `Confidence: ${(node.confidence * 100).toFixed(1)}%` : ''}
+                    </div>
+                `;
+            }
+            
+            getNodeColor(type) {
+                const colors = {
+                    'target': '#ff4444',
+                    'domain': '#4444ff',
+                    'ip': '#44ff44',
+                    'email': '#ffaa00',
+                    'person': '#aa44ff',
+                    'default': '#888888'
+                };
+                
+                return colors[type] || colors.default;
+            }
+            
+            updateResultsPanel(results) {
+                const entityList = document.getElementById('entity-list');
+                entityList.innerHTML = '';
+                
+                // Process entities from all sources
+                const allEntities = [];
+                
+                for (const [source, data] of Object.entries(results.sources)) {
+                    if (data.entities) {
+                        allEntities.push(...data.entities.map(entity => ({
+                            ...entity,
+                            source: source
+                        })));
+                    }
+                }
+                
+                // Sort by confidence
+                allEntities.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+                
+                // Create entity cards
+                allEntities.forEach(entity => {
+                    const card = document.createElement('div');
+                    card.className = 'entity-card';
+                    card.innerHTML = `
+                        <div>
+                            <strong>${entity.value}</strong>
+                            <span style="color: #666; font-size: 0.9em;">(${entity.type})</span>
+                        </div>
+                        <div style="font-size: 0.8em; color: #888;">
+                            Source: ${entity.source}
+                        </div>
+                        <div class="confidence-bar">
+                            <div class="confidence-fill" style="width: ${(entity.confidence || 0) * 100}%"></div>
+                        </div>
+                    `;
+                    entityList.appendChild(card);
+                });
+            }
+            
+            onNodeClick(event) {
+                const nodeId = event.nodes[0];
+                if (nodeId) {
+                    console.log('Node clicked:', nodeId);
+                    // Implement node detail view
+                }
+            }
+            
+            onNodeHover(event) {
+                const nodeId = event.node;
+                // Implement hover effects
+            }
+        }
+        
+        // Initialize dashboard
+        const dashboard = new OSINTDashboard();
+        
+        // Global function for button click
+        function startCollection() {
+            dashboard.startCollection();
+        }
+    </script>
+</body>
+</html>
