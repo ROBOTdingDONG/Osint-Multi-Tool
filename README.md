@@ -1,4 +1,3 @@
-```markdown
 # Osint-Multi-Tool
 
 Osint-Multi-Tool is an advanced framework for integrated Open Source Intelligence (OSINT) collection, analysis, and visualization. It automates the orchestration of multiple OSINT tools and enables unified intelligence gathering with graph-based visualization and storage.
@@ -44,7 +43,6 @@ Osint-Multi-Tool is an advanced framework for integrated Open Source Intelligenc
    ```bash
    git clone https://github.com/ROBOTdingDONG/Osint-Multi-Tool.git
    cd Osint-Multi-Tool
-   ```
 
 2. **Install dependencies:**
    ```bash
